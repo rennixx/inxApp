@@ -125,10 +125,13 @@ class _ApiConfigSectionState extends ConsumerState<ApiConfigSection> {
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Connection successful!'),
-            backgroundColor: Color(0xFF00B894),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: const Text(
+              'Connection successful!',
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: const Color.fromARGB(255, 0, 0, 0),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -226,10 +229,7 @@ class _ApiConfigSectionState extends ConsumerState<ApiConfigSection> {
           children: [
             const Text(
               'Enter your Google Gemini API key to enable AI translation features.',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-              ),
+              style: TextStyle(color: Colors.white70, fontSize: 14),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -364,7 +364,9 @@ class _ApiConfigSectionState extends ConsumerState<ApiConfigSection> {
               ? _maskedKey
               : 'Not configured - Translation features disabled',
           leading: PhosphorIcons.key(PhosphorIconsStyle.regular),
-          leadingColor: _isInitialized ? const Color(0xFF00B894) : const Color(0xFF6C5CE7),
+          leadingColor: _isInitialized
+              ? const Color(0xFF00B894)
+              : const Color(0xFF6C5CE7),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -375,7 +377,9 @@ class _ApiConfigSectionState extends ConsumerState<ApiConfigSection> {
                     height: 16,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6C5CE7)),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Color(0xFF6C5CE7),
+                      ),
                     ),
                   )
                 else
@@ -445,9 +449,11 @@ class _ApiConfigSectionState extends ConsumerState<ApiConfigSection> {
                 const SizedBox(height: 8),
                 GestureDetector(
                   onTap: () {
-                    Clipboard.setData(const ClipboardData(
-                      text: 'https://aistudio.google.com/app/apikey',
-                    ));
+                    Clipboard.setData(
+                      const ClipboardData(
+                        text: 'https://aistudio.google.com/app/apikey',
+                      ),
+                    );
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('URL copied to clipboard'),

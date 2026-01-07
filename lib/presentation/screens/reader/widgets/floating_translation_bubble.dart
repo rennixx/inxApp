@@ -129,38 +129,34 @@ class _FloatingTranslationBubbleState extends State<FloatingTranslationBubble>
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      left: _position.dx,
-      top: _position.dy,
-      child: GestureDetector(
-        onPanUpdate: _handleDragUpdate,
-        onPanEnd: _handleDragEnd,
-        onTap: () {
-          if (!_isDragging) {
-            widget.onTap();
+    return GestureDetector(
+      onPanUpdate: _handleDragUpdate,
+      onPanEnd: _handleDragEnd,
+      onTap: () {
+        if (!_isDragging) {
+          widget.onTap();
+        }
+      },
+      child: AnimatedBuilder(
+        animation: _animationController,
+        builder: (context, child) {
+          double scale = 1.0;
+          double rotation = 0.0;
+
+          if (widget.state == TranslationBubbleState.idle) {
+            scale = _pulseAnimation.value;
+          } else if (widget.state == TranslationBubbleState.processing) {
+            rotation = _rotateAnimation.value;
           }
+
+          return Transform.scale(
+            scale: scale,
+            child: Transform.rotate(
+              angle: rotation,
+              child: _buildBubble(),
+            ),
+          );
         },
-        child: AnimatedBuilder(
-          animation: _animationController,
-          builder: (context, child) {
-            double scale = 1.0;
-            double rotation = 0.0;
-
-            if (widget.state == TranslationBubbleState.idle) {
-              scale = _pulseAnimation.value;
-            } else if (widget.state == TranslationBubbleState.processing) {
-              rotation = _rotateAnimation.value;
-            }
-
-            return Transform.scale(
-              scale: scale,
-              child: Transform.rotate(
-                angle: rotation,
-                child: _buildBubble(),
-              ),
-            );
-          },
-        ),
       ),
     );
   }

@@ -7,14 +7,17 @@ import 'core/performance/performance_monitor.dart';
 import 'core/performance/power_profile_manager.dart';
 import 'core/performance/dynamic_memory_manager.dart';
 import 'core/performance/background_processing_manager.dart';
+import 'core/config/api_config.dart';
+import 'core/utils/logger.dart';
+import 'data/services/translation_pipeline_service.dart';
 import 'presentation/screens/splash_screen.dart';
 import 'presentation/screens/home_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize performance managers
-  _initializePerformanceServices();
+  await _initializeServices();
 
   runApp(
     const ProviderScope(
@@ -23,8 +26,8 @@ void main() {
   );
 }
 
-/// Initialize all performance optimization services
-void _initializePerformanceServices() {
+/// Initialize all services
+Future<void> _initializeServices() async {
   // Initialize memory management
   MemoryManager().initialize();
 
@@ -42,6 +45,19 @@ void _initializePerformanceServices() {
 
   // Initialize background processing manager
   BackgroundProcessingManager().initialize();
+
+  // Initialize translation pipeline if API key is stored
+  final apiKey = await ApiConfig.getGeminiApiKey();
+  if (apiKey != null && apiKey.isNotEmpty) {
+    try {
+      await TranslationPipelineService.initialize(geminiApiKey: apiKey);
+      AppLogger.info('Translation pipeline initialized with stored API key', tag: 'Main');
+    } catch (e) {
+      AppLogger.error('Failed to initialize translation pipeline', error: e, tag: 'Main');
+    }
+  } else {
+    AppLogger.info('No API key found - translation features disabled', tag: 'Main');
+  }
 }
 
 class MyApp extends StatelessWidget {
