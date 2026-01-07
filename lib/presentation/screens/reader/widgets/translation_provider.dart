@@ -160,7 +160,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
       // Perform actual translation using the pipeline
       final config = PipelineConfig(
         targetLanguage: 'en',
-        ocrLanguage: OcrLanguage.japanese,
+        ocrLanguage: OcrLanguage.chinese, // Chinese for manhua
         preferredModel: GeminiModel.flash,
         useCache: true,
       );
@@ -185,18 +185,26 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         final ocrRegions = result.ocrResult!.textRegions;
 
         AppLogger.info('Found ${ocrRegions.length} text regions, processing all...', tag: 'Translation');
+        AppLogger.info('OCR detected text: ${result.ocrResult!.fullText}', tag: 'Translation');
 
-        for (final region in ocrRegions) {
-          // Translate each text region individually using ORIGINAL image
+        // Process each region with progress updates
+        // OPTIMIZATION: Translate directly from already-detected text instead of re-running OCR
+        for (int i = 0; i < ocrRegions.length; i++) {
+          final region = ocrRegions[i];
+          AppLogger.info('Processing region ${i + 1}/${ocrRegions.length}: "${region.text}"', tag: 'Translation');
+
+          // Translate the already-detected text directly
           try {
-            final regionResult = await TranslationPipelineService.translateRegion(
-              imagePathForOcr, // Use original image path!
-              region.boundingBox,
-              config: config,
+            final translationResult = await GeminiService.translateText(
+              region.text,
+              config.targetLanguage,
+              sourceLanguage: config.sourceLanguage,
+              preferredModel: config.preferredModel,
+              context: config.context,
             );
 
             final stamp = TranslationStamp(
-              text: regionResult.translatedText,
+              text: translationResult.translatedText,
               region: region.boundingBox,
               fontSize: (region.boundingBox.height * 0.6).clamp(16.0, 48.0), // Increased font size
               fontFamily: 'Roboto',
@@ -206,9 +214,9 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
             );
 
             stamps.add(stamp);
-            AppLogger.info('Translated region: ${regionResult.translatedText}', tag: 'Translation');
+            AppLogger.info('✓ Region ${i + 1} translated: "${translationResult.translatedText}"', tag: 'Translation');
           } catch (e) {
-            AppLogger.error('Failed to translate region', error: e, tag: 'Translation');
+            AppLogger.error('✗ Failed to translate region ${i + 1}: "${region.text}"', error: e, tag: 'Translation');
           }
         }
 
@@ -280,13 +288,24 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
       );
     } catch (e) {
       AppLogger.error('Translation failed', error: e, tag: 'Translation');
+
+      // Provide user-friendly error messages
+      String userMessage = e.toString();
+      if (e.toString().contains('No text detected') || e.toString().contains('No text found')) {
+        userMessage = 'No text detected on this page. This might be an action scene or page without dialogue.';
+      } else if (e.toString().contains('Translation pipeline not initialized')) {
+        userMessage = 'Please configure your Gemini API key in settings.';
+      } else if (e.toString().contains('API Error')) {
+        userMessage = 'Translation API error. Please check your connection.';
+      }
+
       state = state.copyWith(
         bubbleState: TranslationBubbleState.error,
-        errorMessage: e.toString(),
+        errorMessage: userMessage,
       );
 
       // Reset to idle after error
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 3));
       state = state.copyWith(
         bubbleState: TranslationBubbleState.idle,
         errorMessage: null,
