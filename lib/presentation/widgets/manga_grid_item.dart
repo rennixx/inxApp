@@ -105,26 +105,28 @@ class MangaGridItem extends StatelessWidget {
   }
 
   Widget _buildCoverImage(BuildContext context) {
-    if (manga.coverPath != null && !kIsWeb) {
-      // Native platform: use Image.file
-      return ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        child: Image.file(
-          manga.coverPath as File,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return _buildPlaceholder(context);
-          },
-        ),
-      );
-    } else if (kIsWeb && manga.coverPath != null) {
-      // Web platform: load from WebFileStorage
-      final bytes = WebFileStorage.getFile(manga.coverPath!);
-      if (bytes != null) {
+    if (manga.coverPath != null) {
+      if (kIsWeb) {
+        // Web platform: load from WebFileStorage
+        final bytes = WebFileStorage.getFile(manga.coverPath!);
+        if (bytes != null) {
+          return ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return _buildPlaceholder(context);
+              },
+            ),
+          );
+        }
+      } else {
+        // Native platform: use Image.file with file path
         return ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          child: Image.memory(
-            bytes,
+          child: Image.file(
+            File(manga.coverPath!),
             fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) {
               return _buildPlaceholder(context);

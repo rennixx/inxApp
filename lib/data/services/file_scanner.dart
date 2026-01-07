@@ -5,6 +5,8 @@ import 'package:path/path.dart' as path;
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:uuid/uuid.dart';
 import 'package:archive/archive.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/entities/manga.dart';
 import '../../core/utils/logger.dart';
 import 'web_file_storage.dart';
@@ -83,6 +85,8 @@ class FileScanner {
       type: fp.FileType.custom,
       allowedExtensions: supportedExtensions.map((e) => e.replaceFirst('.', '')).toList(),
       allowMultiple: true,
+      // Allow reading bytes on all platforms for consistency
+      withData: true,
     );
 
     if (result == null || result.files.isEmpty) {
@@ -104,8 +108,17 @@ class FileScanner {
           }
         }
       } else {
-        // On mobile/desktop, use path
-        if (file.path != null) {
+        // On mobile/desktop
+        if (file.bytes != null) {
+          // Use bytes if available (works around Android content URI issues)
+          try {
+            final manga = await _createMangaFromBytesWithCache(file.name, file.bytes!, file.path);
+            mangaList.add(manga);
+          } catch (e) {
+            errorList.add('${file.name}: $e');
+          }
+        } else if (file.path != null) {
+          // Fallback to path if bytes not available
           try {
             final manga = await createMangaFromFile(file.path!);
             mangaList.add(manga);
@@ -183,6 +196,81 @@ class FileScanner {
     return manga;
   }
 
+  /// Create manga from bytes and cache to file system (for Android)
+  Future<Manga> _createMangaFromBytesWithCache(String fileName, List<int> bytes, String? originalPath) async {
+    final now = DateTime.now();
+    final extension = path.extension(fileName).toLowerCase();
+    final fileType = _detectFileTypeFromExtension(extension);
+
+    // Cache the file to app's temporary directory
+    final tempDir = await getTemporaryDirectory();
+    final cacheDir = Directory(path.join(tempDir.path, 'manga_cache'));
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+
+    final cachedFileName = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
+    final cachedFile = File(path.join(cacheDir.path, cachedFileName));
+    await cachedFile.writeAsBytes(bytes);
+
+    AppLogger.info('Cached file to: ${cachedFile.path}', tag: 'FileScanner');
+
+    // Store cache mapping if original path was provided
+    if (originalPath != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_file_$originalPath', cachedFile.path);
+    }
+
+    String? coverPath;
+    int totalPages = 0;
+
+    if (fileType == FileType.image) {
+      totalPages = 1;
+      coverPath = cachedFile.path;
+    } else if (fileType == FileType.cbz) {
+      // Extract pages from CBZ archive
+      try {
+        final archive = ZipDecoder().decodeBytes(bytes);
+        final imageFiles = archive.files
+            .where((file) => file.isFile && _isImageFile(file.name))
+            .toList()
+          ..sort((a, b) => a.name.compareTo(b.name));
+
+        totalPages = imageFiles.length;
+
+        // Extract first image as cover
+        if (imageFiles.isNotEmpty) {
+          final coverDir = Directory(path.join(tempDir.path, 'covers'));
+          if (!await coverDir.exists()) {
+            await coverDir.create(recursive: true);
+          }
+          final coverFileName = '${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFiles.first.name)}';
+          final coverFile = File(path.join(coverDir.path, coverFileName));
+          await coverFile.writeAsBytes(imageFiles.first.content as List<int>);
+          coverPath = coverFile.path;
+        }
+
+        AppLogger.info('CBZ contains $totalPages pages', tag: 'FileScanner');
+      } catch (e) {
+        AppLogger.error('Failed to extract CBZ pages', error: e, tag: 'FileScanner');
+      }
+    }
+
+    return Manga(
+      id: const Uuid().v4(),
+      title: generateTitleFromPath(fileName),
+      filePath: cachedFile.path, // Use cached file path
+      fileType: fileType,
+      fileSize: bytes.length,
+      coverPath: coverPath,
+      currentPage: 0,
+      totalPages: totalPages,
+      readingProgress: 0.0,
+      createdAt: now,
+      updatedAt: now,
+    );
+  }
+
   bool _isImageFile(String fileName) {
     final extension = path.extension(fileName).toLowerCase();
     return imageExtensions.contains(extension);
@@ -258,31 +346,97 @@ class FileScanner {
   }
 
   Future<Manga> createMangaFromFile(String filePath) async {
-    final file = File(filePath);
-    if (!file.existsSync()) {
-      throw Exception('File does not exist');
+    // Handle Android content URIs by copying to cache
+    String actualFilePath = filePath;
+    if (!kIsWeb && filePath.startsWith('content://')) {
+      actualFilePath = await _copyContentUriToCache(filePath);
     }
 
-    final fileType = detectFileType(filePath);
+    final file = File(actualFilePath);
+    if (!file.existsSync()) {
+      throw Exception('File does not exist at $actualFilePath');
+    }
+
+    final fileType = detectFileType(actualFilePath);
     final fileSize = await file.length();
     final stat = await file.stat();
     final now = DateTime.now();
 
     String? coverPath;
+    int totalPages = 0;
+
     if (fileType == FileType.image) {
-      coverPath = filePath;
+      coverPath = actualFilePath;
+      totalPages = 1;
+    } else if (fileType == FileType.cbz) {
+      // Extract page count from CBZ
+      try {
+        final bytes = await file.readAsBytes();
+        final archive = ZipDecoder().decodeBytes(bytes);
+        final imageFiles = archive.files
+            .where((f) => f.isFile && _isImageFile(f.name))
+            .toList();
+        totalPages = imageFiles.length;
+
+        // Extract first image as cover
+        if (imageFiles.isNotEmpty) {
+          final tempDir = await getTemporaryDirectory();
+          final coverDir = Directory(path.join(tempDir.path, 'covers'));
+          if (!await coverDir.exists()) {
+            await coverDir.create(recursive: true);
+          }
+          final coverFileName = '${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFiles.first.name)}';
+          final coverFile = File(path.join(coverDir.path, coverFileName));
+          await coverFile.writeAsBytes(imageFiles.first.content as List<int>);
+          coverPath = coverFile.path;
+        }
+
+        AppLogger.info('CBZ contains $totalPages pages', tag: 'FileScanner');
+      } catch (e) {
+        AppLogger.error('Failed to extract CBZ info', error: e, tag: 'FileScanner');
+      }
     }
 
     return Manga(
       id: const Uuid().v4(),
-      title: generateTitleFromPath(filePath),
-      filePath: filePath,
+      title: generateTitleFromPath(actualFilePath),
+      filePath: actualFilePath,
       fileType: fileType,
       fileSize: fileSize,
       coverPath: coverPath,
+      currentPage: 0,
+      totalPages: totalPages,
+      readingProgress: 0.0,
       createdAt: now,
       updatedAt: now,
     );
+  }
+
+  /// Copy content URI to cache directory for Android
+  Future<String> _copyContentUriToCache(String contentUri) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Check if already cached
+      final cachedPath = prefs.getString('cached_file_$contentUri');
+      if (cachedPath != null && File(cachedPath).existsSync()) {
+        AppLogger.info('Using cached file for content URI', tag: 'FileScanner');
+        return cachedPath;
+      }
+
+      // For file_picker on Android, we need to get the bytes directly
+      // This is a workaround - we'll read the file using the file path
+      // and copy it to our cache directory
+
+      AppLogger.warning('Content URI detected - may not work directly on Android 10+', tag: 'FileScanner');
+
+      // Try to read the file (may fail on Android 10+ without proper permissions)
+      // Return the original path and let the image loader handle it
+      return contentUri;
+    } catch (e) {
+      AppLogger.error('Failed to handle content URI', error: e, tag: 'FileScanner');
+      return contentUri;
+    }
   }
 
   Future<List<String>> extractImagesFromArchive(String archivePath) async {

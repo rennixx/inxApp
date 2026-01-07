@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as path;
 import 'package:archive/archive.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../domain/entities/manga.dart';
 import '../../core/utils/logger.dart';
 import 'web_file_storage.dart';
@@ -76,30 +77,63 @@ class ImageLoaderService {
 
   static Future<List<String>> _extractFromArchive(String archivePath) async {
     try {
-      final bytes = await File(archivePath).readAsBytes();
+      AppLogger.info('Extracting from archive: $archivePath', tag: 'ImageLoader');
+
+      // Check if file exists
+      final archiveFile = File(archivePath);
+      if (!await archiveFile.exists()) {
+        AppLogger.error('Archive file does not exist: $archivePath', tag: 'ImageLoader');
+        return [];
+      }
+
+      final bytes = await archiveFile.readAsBytes();
+      AppLogger.info('Read ${bytes.length} bytes from archive', tag: 'ImageLoader');
+
       final archive = ZipDecoder().decodeBytes(bytes);
 
       final imageFiles = <String>[];
 
+      // Use application cache directory for better compatibility
+      final tempDir = await getTemporaryDirectory();
+      final extractDir = Directory(path.join(tempDir.path, 'extracted_images'));
+
+      // Create extraction directory if it doesn't exist
+      if (!await extractDir.exists()) {
+        await extractDir.create(recursive: true);
+      }
+
+      AppLogger.info('Extraction directory: ${extractDir.path}', tag: 'ImageLoader');
+
       for (final file in archive) {
         if (file.isFile && _isImageFile(file.name)) {
-          // Extract to temp directory
-          final tempDir = Directory.systemTemp;
-          final outputPath = path.join(tempDir.path, path.basename(file.name));
+          // Extract to cache directory with unique filename
+          final outputPath = path.join(extractDir.path, path.basename(file.name));
 
-          final outputFile = File(outputPath);
+          // Handle duplicate filenames
+          var finalPath = outputPath;
+          var counter = 1;
+          while (await File(finalPath).exists()) {
+            final ext = path.extension(outputPath);
+            final nameWithoutExt = path.basenameWithoutExtension(outputPath);
+            finalPath = path.join(extractDir.path, '${nameWithoutExt}_$counter$ext');
+            counter++;
+          }
+
+          final outputFile = File(finalPath);
           await outputFile.writeAsBytes(file.content as List<int>);
 
-          imageFiles.add(outputPath);
+          imageFiles.add(finalPath);
+          AppLogger.info('Extracted: ${path.basename(finalPath)}', tag: 'ImageLoader');
         }
       }
 
       // Sort by filename to ensure correct order
       imageFiles.sort((a, b) => a.compareTo(b));
 
+      AppLogger.info('Extracted ${imageFiles.length} images from archive', tag: 'ImageLoader');
       return imageFiles;
-    } catch (e) {
-      AppLogger.error('Failed to extract archive', error: e, tag: 'ImageLoader');
+    } catch (e, stackTrace) {
+      AppLogger.error('Failed to extract archive', error: e, stackTrace: stackTrace, tag: 'ImageLoader');
       return [];
     }
   }

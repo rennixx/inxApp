@@ -89,23 +89,19 @@ class _TranslationOverlayWidget extends StatelessWidget {
         child: Container(
           width: overlay.position.width,
           height: overlay.position.height,
-          constraints: BoxConstraints(
-            minWidth: 80.0,
-            minHeight: 40.0,
+          constraints: const BoxConstraints(
+            minWidth: 40.0,
+            minHeight: 20.0,
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+          padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: opacity),
-            borderRadius: BorderRadius.circular(8.0),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.3),
-              width: 1.5,
-            ),
+            borderRadius: BorderRadius.circular(4.0),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
               ),
             ],
           ),
@@ -115,11 +111,13 @@ class _TranslationOverlayWidget extends StatelessWidget {
               style: GoogleFonts.notoSans(
                 fontSize: overlay.fontSize,
                 color: Colors.black87,
-                height: 1.3,
+                height: 1.1,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.3,
               ),
               textAlign: TextAlign.center,
-              maxLines: null,
-              overflow: TextOverflow.visible,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               softWrap: true,
             ),
           ),

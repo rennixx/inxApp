@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/services/translation_pipeline_service.dart';
 import '../../../../data/services/ocr_service.dart';
 import '../../../../data/services/gemini_service.dart';
+import '../../../../data/services/image_editor_service.dart';
 import '../../../../core/utils/logger.dart';
 import 'translation_overlay.dart';
 import 'floating_translation_bubble.dart';
@@ -19,6 +20,7 @@ class TranslationState {
   final String? currentImagePath;
   final bool autoTranslateEnabled;
   final Set<String> translatedPages; // Track which pages have been translated
+  final String? editedImagePath; // Path to the image with burned-in translations
 
   TranslationState({
     this.overlays = const [],
@@ -31,6 +33,7 @@ class TranslationState {
     this.currentImagePath,
     bool? autoTranslateEnabled,
     Set<String>? translatedPages,
+    this.editedImagePath,
   }) : autoTranslateEnabled = autoTranslateEnabled ?? false,
        translatedPages = translatedPages ?? const {};
 
@@ -45,6 +48,7 @@ class TranslationState {
     String? currentImagePath,
     bool? autoTranslateEnabled,
     Set<String>? translatedPages,
+    String? editedImagePath,
   }) {
     return TranslationState(
       overlays: overlays ?? this.overlays,
@@ -57,6 +61,7 @@ class TranslationState {
       currentImagePath: currentImagePath ?? this.currentImagePath,
       autoTranslateEnabled: autoTranslateEnabled,
       translatedPages: translatedPages,
+      editedImagePath: editedImagePath ?? this.editedImagePath,
     );
   }
 
@@ -162,24 +167,46 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
       AppLogger.info('Translation completed: ${result.translatedText}', tag: 'Translation');
 
-      // Create overlay from result
-      final overlay = TranslationOverlay(
-        id: '${state.currentImagePath}_${DateTime.now().millisecondsSinceEpoch}',
-        position: result.textRegion ?? const Rect.fromLTWH(50, 50, 200, 100),
-        translatedText: result.translatedText,
-        originalText: result.originalText,
-        fontSize: 14.0,
-      );
+      // Burn translation directly into the image
+      if (result.textRegion != null) {
+        final editResult = await ImageEditorService.burnTranslation(
+          imagePath: state.currentImagePath!,
+          translatedText: result.translatedText,
+          region: result.textRegion!,
+          fontSize: (result.textRegion!.height * 0.4).clamp(10.0, 24.0),
+          fontFamily: 'Roboto',
+          textColor: const Color(0xFF000000),
+          backgroundColor: const Color(0xFFFFFFFF),
+          opacity: 0.95,
+        );
 
-      // Mark this page as translated and add overlay
-      final updatedTranslatedPages = {...state.translatedPages, state.currentImagePath!};
-      state = state.copyWith(
-        overlays: [overlay],
-        bubbleState: TranslationBubbleState.complete,
-        translatedPages: updatedTranslatedPages,
-      );
+        AppLogger.info('Translation burned into image: ${editResult.editedImagePath}', tag: 'Translation');
 
-      AppLogger.info('Overlay created, total translated: ${updatedTranslatedPages.length}', tag: 'Translation');
+        // Mark this page as translated and store edited image path
+        final updatedTranslatedPages = {...state.translatedPages, state.currentImagePath!};
+        state = state.copyWith(
+          bubbleState: TranslationBubbleState.complete,
+          translatedPages: updatedTranslatedPages,
+          editedImagePath: editResult.editedImagePath,
+          overlays: [], // Clear overlays since we're using burned-in text
+        );
+      } else {
+        // Fallback to overlay if no region data
+        AppLogger.warning('No OCR region data, falling back to overlay', tag: 'Translation');
+        final overlay = _createSmartOverlay(
+          result: result,
+          imagePath: state.currentImagePath!,
+        );
+
+        final updatedTranslatedPages = {...state.translatedPages, state.currentImagePath!};
+        state = state.copyWith(
+          overlays: [overlay],
+          bubbleState: TranslationBubbleState.complete,
+          translatedPages: updatedTranslatedPages,
+        );
+      }
+
+      AppLogger.info('Translation complete, total translated: ${state.translatedPages.length}', tag: 'Translation');
 
       // Reset to idle after a short delay
       await Future.delayed(const Duration(seconds: 1));
@@ -286,8 +313,80 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
   /// Reset all translated pages cache
   void resetTranslatedPages() {
-    state = state.copyWith(translatedPages: {});
+    state = state.copyWith(
+      translatedPages: {},
+      editedImagePath: null,
+    );
     AppLogger.info('Translated pages cache cleared', tag: 'Translation');
+  }
+
+  /// Create an in-place translation stamp directly over the original text
+  TranslationOverlay _createSmartOverlay({
+    required PipelineTranslationResult result,
+    required String imagePath,
+  }) {
+    final translatedText = result.translatedText;
+    final originalRegion = result.textRegion;
+
+    // If we have OCR region data, use it to position the translation exactly over the original text
+    if (originalRegion != null) {
+      // Use the exact same position as the original text
+      // The overlay will cover and replace the original text
+      final position = Rect.fromLTWH(
+        originalRegion.left,
+        originalRegion.top,
+        originalRegion.width,
+        originalRegion.height,
+      );
+
+      // Calculate font size based on the region height to fit well
+      // Smaller region = smaller font, larger region = larger font
+      final fontSize = (originalRegion.height * 0.4).clamp(10.0, 24.0);
+
+      AppLogger.info(
+        'Created in-place translation stamp: ${translatedText.length} chars over original region (${originalRegion.width.toStringAsFixed(0)}x${originalRegion.height.toStringAsFixed(0)}px) at (${originalRegion.left.toStringAsFixed(0)}, ${originalRegion.top.toStringAsFixed(0)})',
+        tag: 'Translation',
+      );
+
+      return TranslationOverlay(
+        id: '${imagePath}_${DateTime.now().millisecondsSinceEpoch}',
+        position: position,
+        translatedText: translatedText,
+        originalText: result.originalText,
+        fontSize: fontSize,
+      );
+    }
+
+    // Fallback: No OCR region available, estimate from text
+    final textLength = translatedText.length;
+    const charWidth = 9.0;
+    const lineHeight = 16.0;
+
+    // Compact dimensions for in-place replacement
+    final estimatedWidth = (textLength * charWidth).clamp(80.0, 250.0);
+    final estimatedLines = (textLength * charWidth / estimatedWidth).ceil();
+    final estimatedHeight = (estimatedLines * lineHeight) + 4.0;
+
+    // Default position - try to place in a non-intrusive area
+    final position = Rect.fromLTWH(
+      20.0,
+      20.0,
+      estimatedWidth,
+      estimatedHeight.clamp(30.0, 100.0),
+    );
+
+    AppLogger.info(
+      'Created compact overlay (no OCR region): ${translatedText.length} chars, ${estimatedWidth.toStringAsFixed(0)}x${estimatedHeight.toStringAsFixed(0)}px',
+      tag: 'Translation',
+    );
+
+    return TranslationOverlay(
+      id: '${imagePath}_${DateTime.now().millisecondsSinceEpoch}',
+      position: position,
+      translatedText: translatedText,
+      originalText: result.originalText,
+      fontSize: 14.0,
+    );
   }
 }
 

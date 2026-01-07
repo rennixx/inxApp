@@ -21,10 +21,7 @@ class ZoomableImagePage extends StatefulWidget {
   State<ZoomableImagePage> createState() => _ZoomableImagePageState();
 }
 
-class _ZoomableImagePageState extends State<ZoomableImagePage>
-    with SingleTickerProviderStateMixin {
-  double _scale = 1.0;
-  double _previousScale = 1.0;
+class _ZoomableImagePageState extends State<ZoomableImagePage> {
   late TransformationController _transformationController;
 
   @override
@@ -39,47 +36,19 @@ class _ZoomableImagePageState extends State<ZoomableImagePage>
     super.dispose();
   }
 
-  void _onScaleStart(ScaleStartDetails details) {
-    setState(() {
-      _previousScale = _scale;
-    });
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails details) {
-    setState(() {
-      _scale = _previousScale * details.scale;
-      // Clamp scale between 1.0 and 5.0
-      _scale = _scale.clamp(1.0, 5.0);
-    });
-  }
-
-  void _onScaleEnd(ScaleEndDetails details) {
-    // Reset scale if it's close to 1.0
-    if (_scale < 1.1) {
-      setState(() {
-        _scale = 1.0;
-        _transformationController.value = Matrix4.identity();
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
       color: Colors.black,
-      child: GestureDetector(
-        onScaleStart: _onScaleStart,
-        onScaleUpdate: _onScaleUpdate,
-        onScaleEnd: _onScaleEnd,
-        // On web, InteractiveViewer has mouse tracker issues, so we just show the image
-        child: kIsWeb ? _buildImage() : InteractiveViewer(
-          transformationController: _transformationController,
-          minScale: 1.0,
-          maxScale: 5.0,
-          constrained: false,
-          child: _buildImage(),
-        ),
-      ),
+      child: kIsWeb
+          ? _buildImage()
+          : InteractiveViewer(
+              transformationController: _transformationController,
+              minScale: 1.0,
+              maxScale: 5.0,
+              constrained: true,
+              child: _buildImage(),
+            ),
     );
   }
 
@@ -93,25 +62,13 @@ class _ZoomableImagePageState extends State<ZoomableImagePage>
           fit: BoxFit.contain,
           errorBuilder: (context, error, stackTrace) {
             AppLogger.error('Failed to load image: $error', tag: 'ZoomableImagePage');
-            return Container(
-              height: 800,
-              color: Colors.black,
-              child: const Center(
-                child: Icon(Icons.error, color: Colors.white),
-              ),
-            );
+            return _buildErrorWidget();
           },
         );
       }
 
       // Placeholder for loading
-      return Container(
-        height: 800,
-        color: Colors.grey.withValues(alpha: widget.brightness * 0.3),
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
+      return _buildLoadingWidget();
     }
 
     // Check if it's a local file or network URL
@@ -119,47 +76,48 @@ class _ZoomableImagePageState extends State<ZoomableImagePage>
       return CachedNetworkImage(
         imageUrl: widget.imagePath,
         fit: BoxFit.contain,
-        placeholder: (context, url) => Container(
-          height: 800,
-          color: Colors.grey.withValues(alpha: widget.brightness * 0.3),
-          child: const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-        ),
-        errorWidget: (context, url, error) => Container(
-          height: 800,
-          color: Colors.black,
-          child: const Center(
-            child: Icon(Icons.error, color: Colors.white),
-          ),
-        ),
+        placeholder: (context, url) => _buildLoadingWidget(),
+        errorWidget: (context, url, error) => _buildErrorWidget(),
       );
     }
 
     // Local file (native platforms)
-    final file = File(widget.imagePath);
-    if (file.existsSync()) {
-      return Image.file(
-        file,
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) {
-          return Container(
-            height: 800,
-            color: Colors.black,
-            child: const Center(
-              child: Icon(Icons.error, color: Colors.white),
-            ),
-          );
-        },
-      );
+    try {
+      final file = File(widget.imagePath);
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            AppLogger.error('Failed to load image: $error', tag: 'ZoomableImagePage');
+            return _buildErrorWidget();
+          },
+        );
+      }
+    } catch (e) {
+      AppLogger.error('Error loading file: $e', tag: 'ZoomableImagePage');
     }
 
-    // Placeholder for loading
+    // Placeholder for loading or error
+    return _buildLoadingWidget();
+  }
+
+  Widget _buildLoadingWidget() {
     return Container(
       height: 800,
       color: Colors.grey.withValues(alpha: widget.brightness * 0.3),
       child: const Center(
         child: CircularProgressIndicator(color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Container(
+      height: 800,
+      color: Colors.black,
+      child: const Center(
+        child: Icon(Icons.error, color: Colors.white),
       ),
     );
   }
