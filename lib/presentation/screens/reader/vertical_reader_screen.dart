@@ -198,10 +198,44 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
             ),
 
           // Floating Translation Bubble
-          FloatingTranslationBubble(
-            state: translationState.bubbleState,
-            errorMessage: translationState.errorMessage,
-            onTap: () => ref.read(translationProvider.notifier).startTranslation(),
+          Positioned(
+            left: 20,
+            top: 100,
+            child: FloatingTranslationBubble(
+              state: translationState.bubbleState,
+              errorMessage: translationState.errorMessage,
+              onTap: () {
+                print('Bubble tapped! Starting translation...');
+                ref.read(translationProvider.notifier).startTranslation();
+              },
+            ),
+          ),
+
+          // Debug overlay (remove in production)
+          Positioned(
+            top: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Bubble: ${translationState.bubbleState.name}',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                  Text(
+                    'Images: ${_imagePaths.length}',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
           ),
 
           // Translation Controls (when visible)
