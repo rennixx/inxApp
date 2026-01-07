@@ -50,6 +50,11 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
       setState(() {
         _imagePaths = imagePaths;
       });
+
+      // Set the first image as the current translation target
+      if (imagePaths.isNotEmpty) {
+        ref.read(translationProvider.notifier).setCurrentImagePath(imagePaths[0]);
+      }
     }
   }
 
@@ -65,6 +70,17 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
             (progress * _imagePaths.length).floor(),
             _imagePaths.length,
           );
+
+      // Update current page
+      final currentPage = (progress * _imagePaths.length).floor();
+      if (_imagePaths.isNotEmpty && currentPage >= 0 && currentPage < _imagePaths.length) {
+        setState(() {
+          _currentPage = currentPage;
+        });
+
+        // Update translation provider with current image path
+        ref.read(translationProvider.notifier).setCurrentImagePath(_imagePaths[currentPage]);
+      }
     }
   }
 
@@ -231,6 +247,19 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
                   ),
                   Text(
                     'Images: ${_imagePaths.length}',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                  Text(
+                    'Page: $_currentPage',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                  if (translationState.currentImagePath != null)
+                    Text(
+                      'Has Image: Yes',
+                      style: const TextStyle(color: Color(0xFF00B894), fontSize: 10),
+                    ),
+                  Text(
+                    'Overlays: ${translationState.overlays.length}',
                     style: const TextStyle(color: Colors.white, fontSize: 10),
                   ),
                 ],

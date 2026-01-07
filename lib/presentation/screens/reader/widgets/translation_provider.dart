@@ -1,6 +1,9 @@
 import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/services/translation_pipeline_service.dart';
+import '../../../../data/services/ocr_service.dart';
+import '../../../../data/services/gemini_service.dart';
+import '../../../../core/utils/logger.dart';
 import 'translation_overlay.dart';
 import 'floating_translation_bubble.dart';
 
@@ -13,6 +16,7 @@ class TranslationState {
   final bool showOverlays;
   final bool isCreateMode;
   final String? errorMessage;
+  final String? currentImagePath;
 
   TranslationState({
     this.overlays = const [],
@@ -22,6 +26,7 @@ class TranslationState {
     this.showOverlays = true,
     this.isCreateMode = false,
     this.errorMessage,
+    this.currentImagePath,
   });
 
   TranslationState copyWith({
@@ -32,6 +37,7 @@ class TranslationState {
     bool? showOverlays,
     bool? isCreateMode,
     String? errorMessage,
+    String? currentImagePath,
   }) {
     return TranslationState(
       overlays: overlays ?? this.overlays,
@@ -41,6 +47,7 @@ class TranslationState {
       showOverlays: showOverlays ?? this.showOverlays,
       isCreateMode: isCreateMode ?? this.isCreateMode,
       errorMessage: errorMessage,
+      currentImagePath: currentImagePath ?? this.currentImagePath,
     );
   }
 }
@@ -49,8 +56,26 @@ class TranslationState {
 class TranslationNotifier extends StateNotifier<TranslationState> {
   TranslationNotifier() : super(TranslationState());
 
+  /// Set the current image path for translation
+  void setCurrentImagePath(String path) {
+    state = state.copyWith(currentImagePath: path);
+  }
+
   /// Start translation process (bubble tapped)
   Future<void> startTranslation() async {
+    if (state.currentImagePath == null) {
+      state = state.copyWith(
+        bubbleState: TranslationBubbleState.error,
+        errorMessage: 'No image loaded',
+      );
+      await Future.delayed(const Duration(seconds: 2));
+      state = state.copyWith(
+        bubbleState: TranslationBubbleState.idle,
+        errorMessage: null,
+      );
+      return;
+    }
+
     state = state.copyWith(
       bubbleState: TranslationBubbleState.processing,
       errorMessage: null,
@@ -62,14 +87,44 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         throw Exception('Translation pipeline not initialized. Please check your API key.');
       }
 
-      // For demo purposes, we'll simulate a translation
-      // In production, this would trigger the full pipeline on current page
-      await Future.delayed(const Duration(seconds: 1));
+      AppLogger.info('Starting translation for: ${state.currentImagePath}', tag: 'Translation');
 
-      // Simulate successful translation
+      // Perform actual translation using the pipeline
+      final config = PipelineConfig(
+        targetLanguage: 'en',
+        ocrLanguage: OcrLanguage.japanese,
+        preferredModel: GeminiModel.flash,
+        useCache: true,
+      );
+
+      final result = await TranslationPipelineService.translateImage(
+        state.currentImagePath!,
+        config: config,
+        onProgress: (progress) {
+          AppLogger.info(
+            'Translation progress: ${progress.stage} - ${(progress.progress * 100).toInt()}%',
+            tag: 'Translation',
+          );
+        },
+      );
+
+      AppLogger.info('Translation completed: ${result.translatedText}', tag: 'Translation');
+
+      // Create overlay from result
+      final overlay = TranslationOverlay(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        position: result.textRegion ?? const Rect.fromLTWH(50, 50, 200, 100),
+        translatedText: result.translatedText,
+        originalText: result.originalText,
+        fontSize: 14.0,
+      );
+
       state = state.copyWith(
+        overlays: [overlay],
         bubbleState: TranslationBubbleState.complete,
       );
+
+      AppLogger.info('Translation overlay created', tag: 'Translation');
 
       // Auto-reset to idle after 2 seconds
       await Future.delayed(const Duration(seconds: 2));
@@ -77,6 +132,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         bubbleState: TranslationBubbleState.idle,
       );
     } catch (e) {
+      AppLogger.error('Translation failed', error: e, tag: 'Translation');
       state = state.copyWith(
         bubbleState: TranslationBubbleState.error,
         errorMessage: e.toString(),
