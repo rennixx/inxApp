@@ -41,6 +41,16 @@ class TextRegion {
       detectedLanguage: language,
     );
   }
+
+  factory TextRegion.fromTextLine(TextLine line, OcrLanguage language) {
+    return TextRegion(
+      text: line.text,
+      boundingBox: line.boundingBox,
+      cornerPoints: line.cornerPoints.map((p) => Offset(p.x.toDouble(), p.y.toDouble())).toList(),
+      confidence: 0.8, // ML Kit doesn't provide confidence per line
+      detectedLanguage: language,
+    );
+  }
 }
 
 /// Image preprocessing options
@@ -190,9 +200,14 @@ class OcrService {
 
       stopwatch.stop();
 
-      final textRegions = recognizedText.blocks.map((block) {
-        return TextRegion.fromTextBlock(block, language);
-      }).toList();
+      // Extract LINES instead of BLOCKS for more granular text detection
+      // This gives us individual text lines instead of grouped blocks
+      final textRegions = <TextRegion>[];
+      for (final block in recognizedText.blocks) {
+        for (final line in block.lines) {
+          textRegions.add(TextRegion.fromTextLine(line, language));
+        }
+      }
 
       final result = OcrResult(
         textRegions: textRegions,
@@ -202,7 +217,7 @@ class OcrService {
       );
 
       AppLogger.info(
-        'OCR complete: ${textRegions.length} regions in ${stopwatch.elapsedMilliseconds}ms',
+        'OCR complete: ${textRegions.length} regions (${recognizedText.blocks.length} blocks, ${textRegions.length} lines) in ${stopwatch.elapsedMilliseconds}ms',
         tag: 'OcrService',
       );
 

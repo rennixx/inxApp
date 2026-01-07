@@ -1,10 +1,12 @@
-import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:image/image.dart' as img;
 import 'dart:io';
+import 'dart:typed_data';
 import '../../core/utils/logger.dart';
+import '../services/web_file_storage.dart';
 
 /// Result of image editing operation
 class ImageEditResult {
@@ -39,21 +41,31 @@ class ImageEditorService {
     Color backgroundColor = const Color(0xFFFFFFFF),
     double opacity = 0.95,
   }) async {
-    if (kIsWeb) {
-      throw UnsupportedError('Image editing not supported on web');
-    }
-
     try {
       AppLogger.info('Burning translation onto image: $imagePath', tag: 'ImageEditor');
 
-      // Load the original image
-      final file = File(imagePath);
-      final bytes = await file.readAsBytes();
+      // Load the original image bytes
+      Uint8List bytes;
 
-      // Decode the image
-      final codec = await ui.instantiateImageCodec(bytes.buffer.asUint8List());
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
+      if (kIsWeb) {
+        // On web, load from WebFileStorage
+        final webBytes = WebFileStorage.getFile(imagePath);
+        if (webBytes == null) {
+          throw Exception('Image not found in web storage: $imagePath');
+        }
+        bytes = webBytes;
+      } else {
+        // On native platforms, load from file
+        final file = File(imagePath);
+        bytes = await file.readAsBytes();
+      }
+
+      // Decode image using the image package (cross-platform)
+      img.Image? image = img.decodeImage(bytes);
+
+      if (image == null) {
+        throw Exception('Failed to decode image');
+      }
 
       final width = image.width;
       final height = image.height;
@@ -61,83 +73,115 @@ class ImageEditorService {
       AppLogger.info('Original image size: ${width}x$height', tag: 'ImageEditor');
       AppLogger.info('Text region: ${region.width.toStringAsFixed(0)}x${region.height.toStringAsFixed(0)} at (${region.left.toStringAsFixed(0)}, ${region.top.toStringAsFixed(0)})', tag: 'ImageEditor');
 
-      // Create a recorder for the new image
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
+      // Convert region coordinates to integers
+      final x1 = region.left.round();
+      final y1 = region.top.round();
+      final x2 = (region.left + region.width).round();
+      final y2 = (region.top + region.height).round();
 
-      // Draw the original image
-      final srcRect = Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble());
-      final dstRect = Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble());
-      canvas.drawImage(image, Offset.zero, Paint());
+      // Create white background rectangle over the text region
+      final bgColor = img.ColorRgb8(
+        (backgroundColor.r * 255.0).round() & 0xff,
+        (backgroundColor.g * 255.0).round() & 0xff,
+        (backgroundColor.b * 255.0).round() & 0xff,
+      );
 
-      // Draw white background over the text region (erases original text)
-      final bgPaint = Paint()
-        ..color = backgroundColor.withValues(alpha: opacity)
-        ..style = PaintingStyle.fill
-        ..blendMode = ui.BlendMode.srcOver;
-
-      canvas.drawRect(region, bgPaint);
+      // Fill the region with white background (with opacity simulation)
+      // Note: The image package doesn't support alpha blending directly on the main image
+      // So we'll use a solid fill for now
+      img.fillRect(
+        image,
+        x1: x1,
+        y1: y1,
+        x2: x2,
+        y2: y2,
+        color: bgColor,
+      );
 
       // Draw the translated text
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: translatedText,
-          style: TextStyle(
-            color: textColor,
-            fontSize: fontSize,
-            fontFamily: fontFamily,
-            fontWeight: FontWeight.w600,
-            height: 1.1,
-            letterSpacing: -0.3,
-          ),
-        ),
-        textDirection: ui.TextDirection.ltr,
-        textAlign: TextAlign.center,
-        maxLines: 3,
-        ellipsis: '...',
+      // Note: The image package has limited font support
+      // We'll use a basic font for now
+      final textColorRgb = img.ColorRgb8(
+        (textColor.r * 255.0).round() & 0xff,
+        (textColor.g * 255.0).round() & 0xff,
+        (textColor.b * 255.0).round() & 0xff,
       );
 
-      // Layout and draw the text centered in the region
-      textPainter.layout(maxWidth: region.width);
-      final textOffset = Offset(
-        region.left + (region.width - textPainter.width) / 2,
-        region.top + (region.height - textPainter.height) / 2,
-      );
-      textPainter.paint(canvas, textOffset);
+      // Calculate font size (scaled for the image package)
+      final scaledFontSize = fontSize.round();
 
-      // Convert to image
-      final picture = recorder.endRecording();
-      final imageInfo = await picture.toImage(width, height);
-      final byteData = await imageInfo.toByteData(format: ui.ImageByteFormat.png);
+      // Draw text centered in the region
+      // Note: The image package doesn't support complex text layout
+      // We'll draw a simple text for now
+      try {
+        // Try to use a built-in font
+        img.drawString(
+          image,
+          translatedText,
+          font: img.arial24,
+          x: x1 + (x2 - x1) ~/ 2,
+          y: y1 + (y2 - y1) ~/ 2,
+          color: textColorRgb,
+        );
+      } catch (e) {
+        // If font drawing fails, fall back to a simple rectangle with text indication
+        AppLogger.warning('Font drawing failed, using fallback: $e', tag: 'ImageEditor');
 
-      if (byteData == null) {
-        throw Exception('Failed to encode edited image');
+        // Draw a colored border around the region to indicate translation
+        img.drawRect(
+          image,
+          x1: x1,
+          y1: y1,
+          x2: x2,
+          y2: y2,
+          color: textColorRgb,
+          thickness: 2,
+        );
       }
+
+      // Encode the edited image to PNG
+      final editedBytes = img.encodePng(image);
 
       // Save the edited image
-      final tempDir = await getTemporaryDirectory();
-      final editDir = Directory(path.join(tempDir.path, 'edited_images'));
-      if (!await editDir.exists()) {
-        await editDir.create(recursive: true);
+      if (kIsWeb) {
+        // On web, save to WebFileStorage
+        final outputPath = '${imagePath}_edited_${DateTime.now().millisecondsSinceEpoch}.png';
+        WebFileStorage.storeFile(outputPath, editedBytes);
+
+        AppLogger.info('Edited image saved to web storage: $outputPath', tag: 'ImageEditor');
+
+        return ImageEditResult(
+          editedImagePath: outputPath,
+          originalWidth: width,
+          originalHeight: height,
+          textRegionsCount: 1,
+        );
+      } else {
+        // On native platforms, save to file system
+        final tempDir = await getTemporaryDirectory();
+        final editDir = Directory(path.join(tempDir.path, 'edited_images'));
+        if (!await editDir.exists()) {
+          await editDir.create(recursive: true);
+        }
+
+        final fileName = '${path.basenameWithoutExtension(imagePath)}_edited_${DateTime.now().millisecondsSinceEpoch}.png';
+        final editedFile = File(path.join(editDir.path, fileName));
+        await editedFile.writeAsBytes(editedBytes);
+
+        AppLogger.info('Edited image saved to: ${editedFile.path}', tag: 'ImageEditor');
+
+        final result = ImageEditResult(
+          editedImagePath: editedFile.path,
+          originalWidth: width,
+          originalHeight: height,
+          textRegionsCount: 1,
+        );
+
+        // Cache the result
+        _editedCache[imagePath] = result;
+
+        return result;
       }
-
-      final fileName = '${path.basenameWithoutExtension(imagePath)}_edited_${DateTime.now().millisecondsSinceEpoch}.png';
-      final editedFile = File(path.join(editDir.path, fileName));
-      await editedFile.writeAsBytes(byteData.buffer.asUint8List());
-
-      AppLogger.info('Edited image saved to: ${editedFile.path}', tag: 'ImageEditor');
-
-      final result = ImageEditResult(
-        editedImagePath: editedFile.path,
-        originalWidth: width,
-        originalHeight: height,
-        textRegionsCount: 1,
-      );
-
-      // Cache the result
-      _editedCache[imagePath] = result;
-
-      return result;
     } catch (e, stackTrace) {
       AppLogger.error('Failed to burn translation onto image', error: e, stackTrace: stackTrace, tag: 'ImageEditor');
       rethrow;
@@ -161,47 +205,64 @@ class ImageEditorService {
     Color fillColor = const Color(0xFFFFFFFF),
   }) async {
     if (kIsWeb) {
-      throw UnsupportedError('Image editing not supported on web');
+      // Web implementation
+      final bytes = WebFileStorage.getFile(imagePath);
+      if (bytes == null) {
+        throw Exception('Image not found in web storage: $imagePath');
+      }
+
+      img.Image? image = img.decodeImage(bytes);
+      if (image == null) {
+        throw Exception('Failed to decode image');
+      }
+
+      final x1 = region.left.round();
+      final y1 = region.top.round();
+      final x2 = (region.left + region.width).round();
+      final y2 = (region.top + region.height).round();
+
+      final color = img.ColorRgb8(
+        (fillColor.r * 255.0).round() & 0xff,
+        (fillColor.g * 255.0).round() & 0xff,
+        (fillColor.b * 255.0).round() & 0xff,
+      );
+      img.fillRect(image, x1: x1, y1: y1, x2: x2, y2: y2, color: color);
+
+      final editedBytes = img.encodePng(image);
+      final outputPath = '${imagePath}_cleaned_${DateTime.now().millisecondsSinceEpoch}.png';
+      WebFileStorage.storeFile(outputPath, editedBytes);
+
+      return ImageEditResult(
+        editedImagePath: outputPath,
+        originalWidth: image.width,
+        originalHeight: image.height,
+        textRegionsCount: 1,
+      );
     }
 
     try {
-      // Load the original image
       final file = File(imagePath);
       final bytes = await file.readAsBytes();
 
-      // Decode the image
-      final codec = await ui.instantiateImageCodec(bytes.buffer.asUint8List());
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
-
-      final width = image.width;
-      final height = image.height;
-
-      // Create a recorder for the new image
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-
-      // Draw the original image
-      canvas.drawImage(image, Offset.zero, Paint());
-
-      // Fill the region with the specified color
-      final paint = Paint()
-        ..color = fillColor
-        ..style = PaintingStyle.fill
-        ..blendMode = ui.BlendMode.srcOver;
-
-      canvas.drawRect(region, paint);
-
-      // Convert to image
-      final picture = recorder.endRecording();
-      final imageInfo = await picture.toImage(width, height);
-      final byteData = await imageInfo.toByteData(format: ui.ImageByteFormat.png);
-
-      if (byteData == null) {
-        throw Exception('Failed to encode edited image');
+      img.Image? image = img.decodeImage(bytes);
+      if (image == null) {
+        throw Exception('Failed to decode image');
       }
 
-      // Save the edited image
+      final x1 = region.left.round();
+      final y1 = region.top.round();
+      final x2 = (region.left + region.width).round();
+      final y2 = (region.top + region.height).round();
+
+      final color = img.ColorRgb8(
+        (fillColor.r * 255.0).round() & 0xff,
+        (fillColor.g * 255.0).round() & 0xff,
+        (fillColor.b * 255.0).round() & 0xff,
+      );
+      img.fillRect(image, x1: x1, y1: y1, x2: x2, y2: y2, color: color);
+
+      final editedBytes = img.encodePng(image);
+
       final tempDir = await getTemporaryDirectory();
       final editDir = Directory(path.join(tempDir.path, 'edited_images'));
       if (!await editDir.exists()) {
@@ -210,14 +271,14 @@ class ImageEditorService {
 
       final fileName = '${path.basenameWithoutExtension(imagePath)}_cleaned_${DateTime.now().millisecondsSinceEpoch}.png';
       final editedFile = File(path.join(editDir.path, fileName));
-      await editedFile.writeAsBytes(byteData.buffer.asUint8List());
+      await editedFile.writeAsBytes(editedBytes);
 
       AppLogger.info('Cleaned text region saved to: ${editedFile.path}', tag: 'ImageEditor');
 
       return ImageEditResult(
         editedImagePath: editedFile.path,
-        originalWidth: width,
-        originalHeight: height,
+        originalWidth: image.width,
+        originalHeight: image.height,
         textRegionsCount: 1,
       );
     } catch (e, stackTrace) {
@@ -232,10 +293,6 @@ class ImageEditorService {
     required List<TranslationStamp> stamps,
     String? outputPath,
   }) async {
-    if (kIsWeb) {
-      throw UnsupportedError('Image editing not supported on web');
-    }
-
     if (stamps.isEmpty) {
       throw ArgumentError('At least one translation stamp is required');
     }
@@ -244,90 +301,93 @@ class ImageEditorService {
       AppLogger.info('Burning ${stamps.length} translations onto image: $imagePath', tag: 'ImageEditor');
 
       // Load the original image
-      final file = File(imagePath);
-      final bytes = await file.readAsBytes();
+      Uint8List bytes;
 
-      // Decode the image
-      final codec = await ui.instantiateImageCodec(bytes.buffer.asUint8List());
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
+      if (kIsWeb) {
+        final webBytes = WebFileStorage.getFile(imagePath);
+        if (webBytes == null) {
+          throw Exception('Image not found in web storage: $imagePath');
+        }
+        bytes = webBytes;
+      } else {
+        final file = File(imagePath);
+        bytes = await file.readAsBytes();
+      }
 
-      final width = image.width;
-      final height = image.height;
-
-      // Create a recorder for the new image
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-
-      // Draw the original image
-      canvas.drawImage(image, Offset.zero, Paint());
+      img.Image? image = img.decodeImage(bytes);
+      if (image == null) {
+        throw Exception('Failed to decode image');
+      }
 
       // Apply each translation stamp
       for (final stamp in stamps) {
-        // Draw white background over the text region
-        final bgPaint = Paint()
-          ..color = stamp.backgroundColor.withValues(alpha: stamp.opacity)
-          ..style = PaintingStyle.fill
-          ..blendMode = ui.BlendMode.srcOver;
+        final x1 = stamp.region.left.round();
+        final y1 = stamp.region.top.round();
+        final x2 = (stamp.region.left + stamp.region.width).round();
+        final y2 = (stamp.region.top + stamp.region.height).round();
 
-        canvas.drawRect(stamp.region, bgPaint);
+        // Draw white background
+        final bgColor = img.ColorRgb8(
+          (stamp.backgroundColor.r * 255.0).round() & 0xff,
+          (stamp.backgroundColor.g * 255.0).round() & 0xff,
+          (stamp.backgroundColor.b * 255.0).round() & 0xff,
+        );
+        img.fillRect(image, x1: x1, y1: y1, x2: x2, y2: y2, color: bgColor);
 
-        // Draw the translated text
-        final textPainter = TextPainter(
-          text: TextSpan(
-            text: stamp.text,
-            style: TextStyle(
-              color: stamp.textColor,
-              fontSize: stamp.fontSize,
-              fontFamily: stamp.fontFamily,
-              fontWeight: FontWeight.w600,
-              height: 1.1,
-              letterSpacing: -0.3,
-            ),
-          ),
-          textDirection: ui.TextDirection.ltr,
-          textAlign: TextAlign.center,
-          maxLines: stamp.maxLines ?? 3,
-          ellipsis: '...',
+        // Draw text
+        final textColor = img.ColorRgb8(
+          (stamp.textColor.r * 255.0).round() & 0xff,
+          (stamp.textColor.g * 255.0).round() & 0xff,
+          (stamp.textColor.b * 255.0).round() & 0xff,
         );
 
-        // Layout and draw the text centered in the region
-        textPainter.layout(maxWidth: stamp.region.width);
-        final textOffset = Offset(
-          stamp.region.left + (stamp.region.width - textPainter.width) / 2,
-          stamp.region.top + (stamp.region.height - textPainter.height) / 2,
+        try {
+          img.drawString(
+            image,
+            stamp.text,
+            font: img.arial24,
+            x: x1 + (x2 - x1) ~/ 2,
+            y: y1 + (y2 - y1) ~/ 2,
+            color: textColor,
+          );
+        } catch (e) {
+          // Fallback to border
+          img.drawRect(image, x1: x1, y1: y1, x2: x2, y2: y2, color: textColor, thickness: 2);
+        }
+      }
+
+      final editedBytes = img.encodePng(image);
+
+      if (kIsWeb) {
+        final outputPath = '${imagePath}_edited_${DateTime.now().millisecondsSinceEpoch}.png';
+        WebFileStorage.storeFile(outputPath, editedBytes);
+
+        return ImageEditResult(
+          editedImagePath: outputPath,
+          originalWidth: image.width,
+          originalHeight: image.height,
+          textRegionsCount: stamps.length,
         );
-        textPainter.paint(canvas, textOffset);
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final editDir = Directory(path.join(tempDir.path, 'edited_images'));
+        if (!await editDir.exists()) {
+          await editDir.create(recursive: true);
+        }
+
+        final fileName = '${path.basenameWithoutExtension(imagePath)}_edited_${DateTime.now().millisecondsSinceEpoch}.png';
+        final editedFile = File(path.join(editDir.path, fileName));
+        await editedFile.writeAsBytes(editedBytes);
+
+        AppLogger.info('Edited image with ${stamps.length} translations saved to: ${editedFile.path}', tag: 'ImageEditor');
+
+        return ImageEditResult(
+          editedImagePath: editedFile.path,
+          originalWidth: image.width,
+          originalHeight: image.height,
+          textRegionsCount: stamps.length,
+        );
       }
-
-      // Convert to image
-      final picture = recorder.endRecording();
-      final imageInfo = await picture.toImage(width, height);
-      final byteData = await imageInfo.toByteData(format: ui.ImageByteFormat.png);
-
-      if (byteData == null) {
-        throw Exception('Failed to encode edited image');
-      }
-
-      // Save the edited image
-      final tempDir = await getTemporaryDirectory();
-      final editDir = Directory(path.join(tempDir.path, 'edited_images'));
-      if (!await editDir.exists()) {
-        await editDir.create(recursive: true);
-      }
-
-      final fileName = '${path.basenameWithoutExtension(imagePath)}_edited_${DateTime.now().millisecondsSinceEpoch}.png';
-      final editedFile = File(path.join(editDir.path, fileName));
-      await editedFile.writeAsBytes(byteData.buffer.asUint8List());
-
-      AppLogger.info('Edited image with ${stamps.length} translations saved to: ${editedFile.path}', tag: 'ImageEditor');
-
-      return ImageEditResult(
-        editedImagePath: editedFile.path,
-        originalWidth: width,
-        originalHeight: height,
-        textRegionsCount: stamps.length,
-      );
     } catch (e, stackTrace) {
       AppLogger.error('Failed to burn multiple translations', error: e, stackTrace: stackTrace, tag: 'ImageEditor');
       rethrow;

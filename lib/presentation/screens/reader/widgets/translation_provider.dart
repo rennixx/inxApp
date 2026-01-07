@@ -21,6 +21,7 @@ class TranslationState {
   final bool autoTranslateEnabled;
   final Set<String> translatedPages; // Track which pages have been translated
   final String? editedImagePath; // Path to the image with burned-in translations
+  final String? originalImagePath; // Store original image path for OCR
 
   TranslationState({
     this.overlays = const [],
@@ -34,6 +35,7 @@ class TranslationState {
     bool? autoTranslateEnabled,
     Set<String>? translatedPages,
     this.editedImagePath,
+    this.originalImagePath,
   }) : autoTranslateEnabled = autoTranslateEnabled ?? false,
        translatedPages = translatedPages ?? const {};
 
@@ -49,6 +51,7 @@ class TranslationState {
     bool? autoTranslateEnabled,
     Set<String>? translatedPages,
     String? editedImagePath,
+    String? originalImagePath,
   }) {
     return TranslationState(
       overlays: overlays ?? this.overlays,
@@ -62,6 +65,7 @@ class TranslationState {
       autoTranslateEnabled: autoTranslateEnabled,
       translatedPages: translatedPages,
       editedImagePath: editedImagePath ?? this.editedImagePath,
+      originalImagePath: originalImagePath ?? this.originalImagePath,
     );
   }
 
@@ -102,7 +106,11 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
   /// Set the current image path for translation
   void setCurrentImagePath(String path) {
-    state = state.copyWith(currentImagePath: path);
+    // Store the original path for OCR purposes
+    state = state.copyWith(
+      currentImagePath: path,
+      originalImagePath: path,
+    );
 
     // Auto-translate if enabled and this page hasn't been translated yet
     if (state.autoTranslateEnabled &&
@@ -114,13 +122,16 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
   /// Translate the current page
   Future<void> translateCurrentPage() async {
-    if (state.currentImagePath == null) {
+    if (state.originalImagePath == null) {
       AppLogger.warning('No image to translate', tag: 'Translation');
       return;
     }
 
+    // Use original image path for OCR, not the edited one
+    final imagePathForOcr = state.originalImagePath!;
+
     // Skip if already translated this page
-    if (state.translatedPages.contains(state.currentImagePath)) {
+    if (state.translatedPages.contains(imagePathForOcr)) {
       AppLogger.info('Page already translated, skipping', tag: 'Translation');
       return;
     }
@@ -131,7 +142,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
       return;
     }
 
-    _lastTranslatedPath = state.currentImagePath;
+    _lastTranslatedPath = imagePathForOcr;
 
     state = state.copyWith(
       bubbleState: TranslationBubbleState.processing,
@@ -144,7 +155,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         throw Exception('Translation pipeline not initialized. Please check your API key.');
       }
 
-      AppLogger.info('Translating: ${state.currentImagePath}', tag: 'Translation');
+      AppLogger.info('Translating: $imagePathForOcr', tag: 'Translation');
 
       // Perform actual translation using the pipeline
       final config = PipelineConfig(
@@ -155,7 +166,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
       );
 
       final result = await TranslationPipelineService.translateImage(
-        state.currentImagePath!,
+        imagePathForOcr,
         config: config,
         onProgress: (progress) {
           AppLogger.debug(
@@ -167,13 +178,67 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
       AppLogger.info('Translation completed: ${result.translatedText}', tag: 'Translation');
 
-      // Burn translation directly into the image
-      if (result.textRegion != null) {
+      // Check if we have OCR results with multiple text regions
+      if (result.ocrResult != null && result.ocrResult!.textRegions.isNotEmpty) {
+        // Process ALL detected text regions
+        final stamps = <TranslationStamp>[];
+        final ocrRegions = result.ocrResult!.textRegions;
+
+        AppLogger.info('Found ${ocrRegions.length} text regions, processing all...', tag: 'Translation');
+
+        for (final region in ocrRegions) {
+          // Translate each text region individually using ORIGINAL image
+          try {
+            final regionResult = await TranslationPipelineService.translateRegion(
+              imagePathForOcr, // Use original image path!
+              region.boundingBox,
+              config: config,
+            );
+
+            final stamp = TranslationStamp(
+              text: regionResult.translatedText,
+              region: region.boundingBox,
+              fontSize: (region.boundingBox.height * 0.6).clamp(16.0, 48.0), // Increased font size
+              fontFamily: 'Roboto',
+              textColor: const Color(0xFF000000),
+              backgroundColor: const Color(0xFFFFFFFF),
+              opacity: 0.95,
+            );
+
+            stamps.add(stamp);
+            AppLogger.info('Translated region: ${regionResult.translatedText}', tag: 'Translation');
+          } catch (e) {
+            AppLogger.error('Failed to translate region', error: e, tag: 'Translation');
+          }
+        }
+
+        // Burn all translations into the image at once (using original image)
+        if (stamps.isNotEmpty) {
+          final editResult = await ImageEditorService.burnMultipleTranslations(
+            imagePath: imagePathForOcr, // Use original image path!
+            stamps: stamps,
+          );
+
+          AppLogger.info('Burned ${stamps.length} translations into image: ${editResult.editedImagePath}', tag: 'Translation');
+
+          // Mark this page as translated and store edited image path
+          final updatedTranslatedPages = {...state.translatedPages, imagePathForOcr};
+          state = state.copyWith(
+            bubbleState: TranslationBubbleState.complete,
+            translatedPages: updatedTranslatedPages,
+            editedImagePath: editResult.editedImagePath,
+            overlays: [], // Clear overlays since we're using burned-in text
+          );
+        } else {
+          throw Exception('No translations were successfully generated');
+        }
+      } else if (result.textRegion != null) {
+        // Fallback: Single region from old API
         final editResult = await ImageEditorService.burnTranslation(
-          imagePath: state.currentImagePath!,
+          imagePath: imagePathForOcr, // Use original image path!
           translatedText: result.translatedText,
           region: result.textRegion!,
-          fontSize: (result.textRegion!.height * 0.4).clamp(10.0, 24.0),
+          fontSize: (result.textRegion!.height * 0.6).clamp(16.0, 48.0), // Increased font size
           fontFamily: 'Roboto',
           textColor: const Color(0xFF000000),
           backgroundColor: const Color(0xFFFFFFFF),
@@ -183,7 +248,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         AppLogger.info('Translation burned into image: ${editResult.editedImagePath}', tag: 'Translation');
 
         // Mark this page as translated and store edited image path
-        final updatedTranslatedPages = {...state.translatedPages, state.currentImagePath!};
+        final updatedTranslatedPages = {...state.translatedPages, imagePathForOcr};
         state = state.copyWith(
           bubbleState: TranslationBubbleState.complete,
           translatedPages: updatedTranslatedPages,
@@ -191,14 +256,14 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
           overlays: [], // Clear overlays since we're using burned-in text
         );
       } else {
-        // Fallback to overlay if no region data
+        // No OCR region data - create overlay with full text
         AppLogger.warning('No OCR region data, falling back to overlay', tag: 'Translation');
         final overlay = _createSmartOverlay(
           result: result,
-          imagePath: state.currentImagePath!,
+          imagePath: imagePathForOcr,
         );
 
-        final updatedTranslatedPages = {...state.translatedPages, state.currentImagePath!};
+        final updatedTranslatedPages = {...state.translatedPages, imagePathForOcr};
         state = state.copyWith(
           overlays: [overlay],
           bubbleState: TranslationBubbleState.complete,
