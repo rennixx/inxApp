@@ -357,6 +357,8 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
       );
     }
 
+    final translationState = ref.watch(translationProvider);
+
     return Container(
       color: Colors.black.withValues(alpha: _brightness),
       child: ListView.builder(
@@ -364,8 +366,15 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
         physics: const ClampingScrollPhysics(),
         itemCount: _imagePaths.length,
         itemBuilder: (context, index) {
+          // Use edited image path if available for the current page
+          final imagePath = _imagePaths[index];
+          final displayPath = (translationState.editedImagePath != null &&
+                               translationState.currentImagePath == imagePath)
+              ? translationState.editedImagePath!
+              : imagePath;
+
           return ZoomableImagePage(
-            imagePath: _imagePaths[index],
+            imagePath: displayPath,
             page: index,
             brightness: _brightness,
           );
