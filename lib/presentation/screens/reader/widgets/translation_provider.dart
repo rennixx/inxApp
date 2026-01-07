@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/services/translation_pipeline_service.dart';
-import '../../../../data/services/gemini_service.dart';
 import 'translation_overlay.dart';
 import 'floating_translation_bubble.dart';
 

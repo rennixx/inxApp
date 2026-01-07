@@ -5,6 +5,7 @@ import '../../../core/theme/glassmorphism.dart';
 import '../../providers/settings_provider.dart';
 import 'widgets/reader_preferences_section.dart';
 import 'widgets/translation_settings_section.dart';
+import 'widgets/api_config_section.dart';
 import 'widgets/storage_management_section.dart';
 import 'widgets/theme_customization_section.dart';
 import 'widgets/performance_settings_section.dart';
@@ -58,6 +59,14 @@ class SettingsScreen extends ConsumerWidget {
 
                 // Translation Settings
                 TranslationSettingsSection(
+                  settings: settings,
+                  onSettingsChanged: (newSettings) {
+                    ref.read(settingsProvider.notifier).updateSettings(newSettings);
+                  },
+                ),
+
+                // API Configuration
+                ApiConfigSection(
                   settings: settings,
                   onSettingsChanged: (newSettings) {
                     ref.read(settingsProvider.notifier).updateSettings(newSettings);
