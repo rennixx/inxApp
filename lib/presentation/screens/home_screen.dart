@@ -3,7 +3,7 @@ import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../core/constants/app_strings.dart';
 import 'library_screen.dart';
 import 'import_screen.dart';
-import 'settings_screen.dart';
+import 'settings/settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});

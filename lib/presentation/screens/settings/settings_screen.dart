@@ -7,6 +7,7 @@ import 'widgets/reader_preferences_section.dart';
 import 'widgets/translation_settings_section.dart';
 import 'widgets/storage_management_section.dart';
 import 'widgets/theme_customization_section.dart';
+import 'widgets/performance_settings_section.dart';
 import 'widgets/about_section.dart';
 
 /// Main settings screen with all configuration sections
@@ -65,6 +66,14 @@ class SettingsScreen extends ConsumerWidget {
 
                 // Storage Management
                 const StorageManagementSection(),
+
+                // Performance Settings
+                PerformanceSettingsSection(
+                  settings: settings,
+                  onSettingsChanged: (newSettings) {
+                    ref.read(settingsProvider.notifier).updateSettings(newSettings);
+                  },
+                ),
 
                 // Theme Customization
                 ThemeCustomizationSection(

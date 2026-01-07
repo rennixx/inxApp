@@ -155,6 +155,7 @@ class TranslationSettingsSection extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1E1E1E),
@@ -176,28 +177,36 @@ class TranslationSettingsSection extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              ...languages.entries.map((entry) {
-                final isSelected = settings.targetLanguage == entry.key;
-                return ListTile(
-                  title: Text(
-                    entry.value,
-                    style: TextStyle(
-                      color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                  trailing: isSelected
-                      ? Icon(
-                          PhosphorIcons.check(PhosphorIconsStyle.fill),
-                          color: const Color(0xFF6C5CE7),
-                        )
-                      : null,
-                  onTap: () {
-                    onSettingsChanged(settings.copyWith(targetLanguage: entry.key));
-                    Navigator.of(context).pop();
-                  },
-                );
-              }),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.6,
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: languages.entries.map((entry) {
+                    final isSelected = settings.targetLanguage == entry.key;
+                    return ListTile(
+                      title: Text(
+                        entry.value,
+                        style: TextStyle(
+                          color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? Icon(
+                              PhosphorIcons.check(PhosphorIconsStyle.fill),
+                              color: const Color(0xFF6C5CE7),
+                            )
+                          : null,
+                      onTap: () {
+                        onSettingsChanged(settings.copyWith(targetLanguage: entry.key));
+                        Navigator.of(context).pop();
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
             ],
           ),
         ),
@@ -209,6 +218,7 @@ class TranslationSettingsSection extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1E1E1E),
@@ -229,39 +239,47 @@ class TranslationSettingsSection extends ConsumerWidget {
                   ),
                 ),
               ),
-              ...TranslationModel.values.map((model) {
-                final isSelected = settings.translationModel == model;
-                return ListTile(
-                  leading: Icon(
-                    _getModelIcon(model),
-                    color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
-                  ),
-                  title: Text(
-                    model.label,
-                    style: TextStyle(
-                      color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                  subtitle: Text(
-                    model.description,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      fontSize: 12,
-                    ),
-                  ),
-                  trailing: isSelected
-                      ? Icon(
-                          PhosphorIcons.check(PhosphorIconsStyle.fill),
-                          color: const Color(0xFF6C5CE7),
-                        )
-                      : null,
-                  onTap: () {
-                    onSettingsChanged(settings.copyWith(translationModel: model));
-                    Navigator.of(context).pop();
-                  },
-                );
-              }),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.5,
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: TranslationModel.values.map((model) {
+                    final isSelected = settings.translationModel == model;
+                    return ListTile(
+                      leading: Icon(
+                        _getModelIcon(model),
+                        color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
+                      ),
+                      title: Text(
+                        model.label,
+                        style: TextStyle(
+                          color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                      subtitle: Text(
+                        model.description,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? Icon(
+                              PhosphorIcons.check(PhosphorIconsStyle.fill),
+                              color: const Color(0xFF6C5CE7),
+                            )
+                          : null,
+                      onTap: () {
+                        onSettingsChanged(settings.copyWith(translationModel: model));
+                        Navigator.of(context).pop();
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
             ],
           ),
         ),
@@ -273,6 +291,7 @@ class TranslationSettingsSection extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1E1E1E),
@@ -293,39 +312,47 @@ class TranslationSettingsSection extends ConsumerWidget {
                   ),
                 ),
               ),
-              ...TranslationQuality.values.map((quality) {
-                final isSelected = settings.translationQuality == quality;
-                return ListTile(
-                  leading: Icon(
-                    _getQualityIcon(quality),
-                    color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
-                  ),
-                  title: Text(
-                    quality.label,
-                    style: TextStyle(
-                      color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                  subtitle: Text(
-                    quality.description,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      fontSize: 12,
-                    ),
-                  ),
-                  trailing: isSelected
-                      ? Icon(
-                          PhosphorIcons.check(PhosphorIconsStyle.fill),
-                          color: const Color(0xFF6C5CE7),
-                        )
-                      : null,
-                  onTap: () {
-                    onSettingsChanged(settings.copyWith(translationQuality: quality));
-                    Navigator.of(context).pop();
-                  },
-                );
-              }),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.4,
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: TranslationQuality.values.map((quality) {
+                    final isSelected = settings.translationQuality == quality;
+                    return ListTile(
+                      leading: Icon(
+                        _getQualityIcon(quality),
+                        color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
+                      ),
+                      title: Text(
+                        quality.label,
+                        style: TextStyle(
+                          color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                      subtitle: Text(
+                        quality.description,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? Icon(
+                              PhosphorIcons.check(PhosphorIconsStyle.fill),
+                              color: const Color(0xFF6C5CE7),
+                            )
+                          : null,
+                      onTap: () {
+                        onSettingsChanged(settings.copyWith(translationQuality: quality));
+                        Navigator.of(context).pop();
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
             ],
           ),
         ),
