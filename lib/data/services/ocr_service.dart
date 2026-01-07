@@ -148,7 +148,30 @@ class OcrService {
     ImagePreprocessingOptions options = const ImagePreprocessingOptions(),
   }) async {
     if (kIsWeb) {
-      throw UnsupportedError('OCR is not supported on web platform');
+      // Mock OCR for web demonstration
+      AppLogger.info('Using mock OCR for web demo', tag: 'OcrService');
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Return mock data simulating detected Japanese text
+      final mockRegion = TextRegion(
+        text: 'こんにちは世界', // "Hello World" in Japanese
+        boundingBox: const Rect.fromLTWH(100, 100, 300, 100),
+        cornerPoints: [
+          const Offset(100, 100),
+          const Offset(400, 100),
+          const Offset(400, 200),
+          const Offset(100, 200),
+        ],
+        confidence: 0.95,
+        detectedLanguage: language,
+      );
+
+      return OcrResult(
+        textRegions: [mockRegion],
+        fullText: 'こんにちは世界',
+        languageUsed: language,
+        processingTimeMs: 500,
+      );
     }
 
     if (!_recognizers.containsKey(language)) {
@@ -199,7 +222,30 @@ class OcrService {
     ImagePreprocessingOptions options = const ImagePreprocessingOptions(),
   }) async {
     if (kIsWeb) {
-      throw UnsupportedError('OCR is not supported on web platform');
+      // Mock OCR for web demonstration
+      AppLogger.info('Using mock OCR for web demo (from bytes)', tag: 'OcrService');
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Return mock data simulating detected Japanese text
+      final mockRegion = TextRegion(
+        text: 'こんにちは世界', // "Hello World" in Japanese
+        boundingBox: const Rect.fromLTWH(100, 100, 300, 100),
+        cornerPoints: [
+          const Offset(100, 100),
+          const Offset(400, 100),
+          const Offset(400, 200),
+          const Offset(100, 200),
+        ],
+        confidence: 0.95,
+        detectedLanguage: language,
+      );
+
+      return OcrResult(
+        textRegions: [mockRegion],
+        fullText: 'こんにちは世界',
+        languageUsed: language,
+        processingTimeMs: 500,
+      );
     }
 
     if (!_recognizers.containsKey(language)) {

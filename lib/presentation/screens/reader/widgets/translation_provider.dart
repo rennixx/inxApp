@@ -17,6 +17,8 @@ class TranslationState {
   final bool isCreateMode;
   final String? errorMessage;
   final String? currentImagePath;
+  final bool autoTranslateEnabled;
+  final Set<String> translatedPages; // Track which pages have been translated
 
   TranslationState({
     this.overlays = const [],
@@ -27,7 +29,10 @@ class TranslationState {
     this.isCreateMode = false,
     this.errorMessage,
     this.currentImagePath,
-  });
+    bool? autoTranslateEnabled,
+    Set<String>? translatedPages,
+  }) : autoTranslateEnabled = autoTranslateEnabled ?? false,
+       translatedPages = translatedPages ?? const {};
 
   TranslationState copyWith({
     List<TranslationOverlay>? overlays,
@@ -38,6 +43,8 @@ class TranslationState {
     bool? isCreateMode,
     String? errorMessage,
     String? currentImagePath,
+    bool? autoTranslateEnabled,
+    Set<String>? translatedPages,
   }) {
     return TranslationState(
       overlays: overlays ?? this.overlays,
@@ -46,8 +53,26 @@ class TranslationState {
       showOriginalText: showOriginalText ?? this.showOriginalText,
       showOverlays: showOverlays ?? this.showOverlays,
       isCreateMode: isCreateMode ?? this.isCreateMode,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage ?? this.errorMessage,
       currentImagePath: currentImagePath ?? this.currentImagePath,
+      autoTranslateEnabled: autoTranslateEnabled,
+      translatedPages: translatedPages,
+    );
+  }
+
+  /// Factory to handle migration from old state format
+  factory TranslationState.fromJson(Map<String, dynamic> json) {
+    return TranslationState(
+      overlays: json['overlays'] as List<TranslationOverlay>? ?? const [],
+      bubbleState: json['bubbleState'] as TranslationBubbleState? ?? TranslationBubbleState.idle,
+      overlayOpacity: (json['overlayOpacity'] as num?)?.toDouble() ?? 0.95,
+      showOriginalText: json['showOriginalText'] as bool? ?? false,
+      showOverlays: json['showOverlays'] as bool? ?? true,
+      isCreateMode: json['isCreateMode'] as bool? ?? false,
+      errorMessage: json['errorMessage'] as String?,
+      currentImagePath: json['currentImagePath'] as String?,
+      autoTranslateEnabled: json['autoTranslateEnabled'] as bool? ?? false,
+      translatedPages: (json['translatedPages'] as Set<String>?) ?? {},
     );
   }
 }
@@ -55,26 +80,53 @@ class TranslationState {
 /// Notifier for managing translation overlays and bubble state
 class TranslationNotifier extends StateNotifier<TranslationState> {
   TranslationNotifier() : super(TranslationState());
+  String? _lastTranslatedPath;
+
+  /// Toggle auto-translate mode
+  void toggleAutoTranslate() {
+    final newState = !state.autoTranslateEnabled;
+    state = state.copyWith(autoTranslateEnabled: newState);
+
+    if (newState && state.currentImagePath != null) {
+      // Start translating immediately when enabled
+      translateCurrentPage();
+    }
+
+    AppLogger.info('Auto-translate ${newState ? "enabled" : "disabled"}', tag: 'Translation');
+  }
 
   /// Set the current image path for translation
   void setCurrentImagePath(String path) {
     state = state.copyWith(currentImagePath: path);
+
+    // Auto-translate if enabled and this page hasn't been translated yet
+    if (state.autoTranslateEnabled &&
+        path != _lastTranslatedPath &&
+        !state.translatedPages.contains(path)) {
+      translateCurrentPage();
+    }
   }
 
-  /// Start translation process (bubble tapped)
-  Future<void> startTranslation() async {
+  /// Translate the current page
+  Future<void> translateCurrentPage() async {
     if (state.currentImagePath == null) {
-      state = state.copyWith(
-        bubbleState: TranslationBubbleState.error,
-        errorMessage: 'No image loaded',
-      );
-      await Future.delayed(const Duration(seconds: 2));
-      state = state.copyWith(
-        bubbleState: TranslationBubbleState.idle,
-        errorMessage: null,
-      );
+      AppLogger.warning('No image to translate', tag: 'Translation');
       return;
     }
+
+    // Skip if already translated this page
+    if (state.translatedPages.contains(state.currentImagePath)) {
+      AppLogger.info('Page already translated, skipping', tag: 'Translation');
+      return;
+    }
+
+    // Don't translate if currently processing another page
+    if (state.bubbleState == TranslationBubbleState.processing) {
+      AppLogger.info('Already processing, skipping', tag: 'Translation');
+      return;
+    }
+
+    _lastTranslatedPath = state.currentImagePath;
 
     state = state.copyWith(
       bubbleState: TranslationBubbleState.processing,
@@ -87,7 +139,7 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         throw Exception('Translation pipeline not initialized. Please check your API key.');
       }
 
-      AppLogger.info('Starting translation for: ${state.currentImagePath}', tag: 'Translation');
+      AppLogger.info('Translating: ${state.currentImagePath}', tag: 'Translation');
 
       // Perform actual translation using the pipeline
       final config = PipelineConfig(
@@ -101,8 +153,8 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         state.currentImagePath!,
         config: config,
         onProgress: (progress) {
-          AppLogger.info(
-            'Translation progress: ${progress.stage} - ${(progress.progress * 100).toInt()}%',
+          AppLogger.debug(
+            'Progress: ${progress.stage} - ${(progress.progress * 100).toInt()}%',
             tag: 'Translation',
           );
         },
@@ -112,22 +164,25 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
 
       // Create overlay from result
       final overlay = TranslationOverlay(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: '${state.currentImagePath}_${DateTime.now().millisecondsSinceEpoch}',
         position: result.textRegion ?? const Rect.fromLTWH(50, 50, 200, 100),
         translatedText: result.translatedText,
         originalText: result.originalText,
         fontSize: 14.0,
       );
 
+      // Mark this page as translated and add overlay
+      final updatedTranslatedPages = {...state.translatedPages, state.currentImagePath!};
       state = state.copyWith(
         overlays: [overlay],
         bubbleState: TranslationBubbleState.complete,
+        translatedPages: updatedTranslatedPages,
       );
 
-      AppLogger.info('Translation overlay created', tag: 'Translation');
+      AppLogger.info('Overlay created, total translated: ${updatedTranslatedPages.length}', tag: 'Translation');
 
-      // Auto-reset to idle after 2 seconds
-      await Future.delayed(const Duration(seconds: 2));
+      // Reset to idle after a short delay
+      await Future.delayed(const Duration(seconds: 1));
       state = state.copyWith(
         bubbleState: TranslationBubbleState.idle,
       );
@@ -138,12 +193,23 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         errorMessage: e.toString(),
       );
 
-      // Auto-reset to idle after 3 seconds
-      await Future.delayed(const Duration(seconds: 3));
+      // Reset to idle after error
+      await Future.delayed(const Duration(seconds: 2));
       state = state.copyWith(
         bubbleState: TranslationBubbleState.idle,
         errorMessage: null,
       );
+    }
+  }
+
+  /// Start translation process (bubble tapped) - manual trigger
+  Future<void> startTranslation() async {
+    if (!state.autoTranslateEnabled) {
+      // If auto-translate is off, just translate the current page once
+      await translateCurrentPage();
+    } else {
+      // If auto-translate is on, toggle it off
+      toggleAutoTranslate();
     }
   }
 
@@ -216,6 +282,12 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
   /// Clear error message
   void clearError() {
     state = state.copyWith(errorMessage: null);
+  }
+
+  /// Reset all translated pages cache
+  void resetTranslatedPages() {
+    state = state.copyWith(translatedPages: {});
+    AppLogger.info('Translated pages cache cleared', tag: 'Translation');
   }
 }
 

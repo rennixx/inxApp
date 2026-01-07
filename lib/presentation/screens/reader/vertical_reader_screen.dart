@@ -242,16 +242,24 @@ class _VerticalReaderScreenState extends ConsumerState<VerticalReaderScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
+                    'Auto: ${translationState.autoTranslateEnabled == true ? "ON" : "OFF"}',
+                    style: TextStyle(
+                      color: translationState.autoTranslateEnabled == true ? const Color(0xFF00B894) : Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
                     'Bubble: ${translationState.bubbleState.name}',
                     style: const TextStyle(color: Colors.white, fontSize: 10),
                   ),
                   Text(
-                    'Images: ${_imagePaths.length}',
+                    'Page: $_currentPage/${_imagePaths.length}',
                     style: const TextStyle(color: Colors.white, fontSize: 10),
                   ),
                   Text(
-                    'Page: $_currentPage',
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                    'Translated: ${translationState.translatedPages?.length ?? 0}',
+                    style: const TextStyle(color: Color(0xFF6C5CE7), fontSize: 10),
                   ),
                   if (translationState.currentImagePath != null)
                     Text(
