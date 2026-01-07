@@ -126,29 +126,14 @@ class OcrService {
     }
 
     try {
-      // Create recognizer with appropriate script for better accuracy
-      // Chinese, Japanese, Korean require specific script models
-      TextRecognizer recognizer;
-
-      switch (language) {
-        case OcrLanguage.chinese:
-          // Use Chinese script model for better accuracy with Chinese characters
-          recognizer = TextRecognizer(script: TextRecognitionScript.chinese);
-        case OcrLanguage.japanese:
-          // Use Japanese script model
-          recognizer = TextRecognizer(script: TextRecognitionScript.japanese);
-        case OcrLanguage.korean:
-          // Use Korean script model
-          recognizer = TextRecognizer(script: TextRecognitionScript.korean);
-        case OcrLanguage.english:
-        case OcrLanguage.latin:
-          // Use default Latin script
-          recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-      }
+      // Create a generic text recognizer
+      // Note: ML Kit's default recognizer actually supports Chinese, Japanese, Korean characters
+      // Using the default recognizer avoids the NoClassDefFoundError with script-specific models
+      final recognizer = TextRecognizer();
 
       _recognizers[language] = recognizer;
 
-      AppLogger.info('OCR initialized for $language with script model', tag: 'OcrService');
+      AppLogger.info('OCR initialized for $language (using universal recognizer)', tag: 'OcrService');
     } catch (e) {
       AppLogger.error('Failed to initialize OCR for $language', error: e, tag: 'OcrService');
       rethrow;

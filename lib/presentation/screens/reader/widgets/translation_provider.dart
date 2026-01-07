@@ -187,37 +187,35 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         AppLogger.info('Found ${ocrRegions.length} text regions, processing all...', tag: 'Translation');
         AppLogger.info('OCR detected text: ${result.ocrResult!.fullText}', tag: 'Translation');
 
-        // Process each region with progress updates
-        // OPTIMIZATION: Translate directly from already-detected text instead of re-running OCR
+        // OPTIMIZATION: Use the already-translated text from the pipeline result
+        // The pipeline already translated the full text, so we can use that directly
+        // instead of making additional API calls for each region
+
+        // Split the translated text by newlines to match the OCR regions
+        final translatedLines = result.translatedText.split('\n');
+
         for (int i = 0; i < ocrRegions.length; i++) {
           final region = ocrRegions[i];
           AppLogger.info('Processing region ${i + 1}/${ocrRegions.length}: "${region.text}"', tag: 'Translation');
 
-          // Translate the already-detected text directly
-          try {
-            final translationResult = await GeminiService.translateText(
-              region.text,
-              config.targetLanguage,
-              sourceLanguage: config.sourceLanguage,
-              preferredModel: config.preferredModel,
-              context: config.context,
-            );
+          // Use the corresponding translated line, or fallback to the original text
+          // if we don't have enough translated lines
+          final translatedText = i < translatedLines.length
+              ? translatedLines[i]
+              : result.translatedText; // Fallback to full translation
 
-            final stamp = TranslationStamp(
-              text: translationResult.translatedText,
-              region: region.boundingBox,
-              fontSize: (region.boundingBox.height * 0.6).clamp(16.0, 48.0), // Increased font size
-              fontFamily: 'Roboto',
-              textColor: const Color(0xFF000000),
-              backgroundColor: const Color(0xFFFFFFFF),
-              opacity: 0.95,
-            );
+          final stamp = TranslationStamp(
+            text: translatedText,
+            region: region.boundingBox,
+            fontSize: (region.boundingBox.height * 0.6).clamp(16.0, 48.0), // Increased font size
+            fontFamily: 'Roboto',
+            textColor: const Color(0xFF000000),
+            backgroundColor: const Color(0xFFFFFFFF),
+            opacity: 0.95,
+          );
 
-            stamps.add(stamp);
-            AppLogger.info('✓ Region ${i + 1} translated: "${translationResult.translatedText}"', tag: 'Translation');
-          } catch (e) {
-            AppLogger.error('✗ Failed to translate region ${i + 1}: "${region.text}"', error: e, tag: 'Translation');
-          }
+          stamps.add(stamp);
+          AppLogger.info('✓ Region ${i + 1} translated: "${translatedText}"', tag: 'Translation');
         }
 
         // Burn all translations into the image at once (using original image)
