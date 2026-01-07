@@ -134,21 +134,16 @@ class OcrService {
         case OcrLanguage.chinese:
           // Use Chinese script model for better accuracy with Chinese characters
           recognizer = TextRecognizer(script: TextRecognitionScript.chinese);
-          break;
         case OcrLanguage.japanese:
           // Use Japanese script model
           recognizer = TextRecognizer(script: TextRecognitionScript.japanese);
-          break;
         case OcrLanguage.korean:
           // Use Korean script model
           recognizer = TextRecognizer(script: TextRecognitionScript.korean);
-          break;
         case OcrLanguage.english:
         case OcrLanguage.latin:
-        default:
           // Use default Latin script
           recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-          break;
       }
 
       _recognizers[language] = recognizer;
