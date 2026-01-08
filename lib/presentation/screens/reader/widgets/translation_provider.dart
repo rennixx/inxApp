@@ -293,6 +293,13 @@ class TranslationNotifier extends StateNotifier<TranslationState> {
         userMessage = 'No text detected on this page. This might be an action scene or page without dialogue.';
       } else if (e.toString().contains('Translation pipeline not initialized')) {
         userMessage = 'Please configure your Gemini API key in settings.';
+      } else if (e.toString().contains('429') || e.toString().contains('quota') || e.toString().contains('rate limit')) {
+        // Extract retry time if available
+        final retryMatch = RegExp(r'Please retry in ([\d.]+)s').firstMatch(e.toString());
+        final retrySeconds = retryMatch != null
+            ? (double.parse(retryMatch.group(1)!) / 60).toStringAsFixed(1)
+            : '1';
+        userMessage = 'Rate limit reached. Please wait about $retrySeconds minutes or upgrade your API plan.';
       } else if (e.toString().contains('API Error')) {
         userMessage = 'Translation API error. Please check your connection.';
       }
